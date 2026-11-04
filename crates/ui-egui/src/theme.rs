@@ -2,6 +2,7 @@
 //! four brightness levels, flat faces with soft corners, panels as rounded cards and one accent
 //! colour). Our own palette and widgets; no third-party assets.
 
+use craft_ui::theme::palette::Palette;
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle, Visuals};
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +100,53 @@ impl Accent {
 
 const fn hex(s: u32) -> Color32 {
     Color32::from_rgb((s >> 16) as u8, (s >> 8) as u8, s as u8)
+}
+
+/// `a` toward `b` by `amount` (0 to 1), in gamma space like the rest of the tokens.
+fn blend(a: Color32, b: Color32, amount: f32) -> Color32 {
+    a.lerp_to_gamma(b, amount.clamp(0.0, 1.0))
+}
+
+/// WCAG relative luminance of `c`.
+fn relative_luminance(c: Color32) -> f32 {
+    let linear = |v: u8| {
+        let v = f32::from(v) / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+}
+
+/// WCAG contrast ratio between two colours.
+fn contrast(a: Color32, b: Color32) -> f32 {
+    let (x, y) = (relative_luminance(a), relative_luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// `foreground` moved away from `background` until it reaches `target` contrast, so a palette
+/// whose text sits too close to its surface still reads.
+fn readable_on(foreground: Color32, background: Color32, target: f32) -> Color32 {
+    let away = if contrast(background, Color32::WHITE) >= contrast(background, Color32::BLACK) { Color32::WHITE } else { Color32::BLACK };
+    let mut color = foreground;
+    for _ in 0..20 {
+        if contrast(color, background) >= target {
+            break;
+        }
+        color = blend(color, away, 0.1);
+    }
+    color
+}
+
+/// The built-in brightness family that matches a palette: a light palette must not keep dark
+/// stock visuals, and the reverse.
+fn family_brightness(b: Brightness, dark: bool) -> Brightness {
+    let saved_dark = matches!(b, Brightness::Dark | Brightness::MediumDark);
+    if saved_dark == dark {
+        b
+    } else if dark {
+        Brightness::Dark
+    } else {
+        Brightness::Light
+    }
 }
 
 /// Colors and metrics used across the UI, fetched each frame with [`Tokens::get`]. Never
@@ -252,6 +300,46 @@ impl Tokens {
         }
     }
 
+    /// The built-in tokens of brightness `b` with the core chrome taken from `palette`. The
+    /// palette decides the dark or light family, and its accent replaces `accent`; everything
+    /// that is not a palette role (metrics and the views' own colours) stays from the built-in
+    /// theme.
+    pub fn for_palette(b: Brightness, accent: Accent, palette: &Palette) -> Self {
+        let built_in = Tokens::for_brightness(family_brightness(b, palette.is_dark())).with_accent(accent);
+        let background = palette.background();
+        let panel = palette.surface();
+        let raised = palette.surface_alt();
+        let outline = palette.outline();
+        let a = palette.accent();
+        let tint = |k: f32| blend(panel, a, k);
+        Tokens {
+            dark: palette.is_dark(),
+            chrome: background,
+            panel,
+            row: blend(background, panel, 0.5),
+            row_hover: raised,
+            row_selected: tint(if palette.is_dark() { 0.24 } else { 0.2 }),
+            separator: outline,
+            text: readable_on(palette.text(), panel, 4.5),
+            text_dim: readable_on(palette.text_muted(), panel, 3.0),
+            text_strong: readable_on(palette.base[7], panel, 7.0),
+            accent: a,
+            accent_strong: blend(a, background, 0.15),
+            accent_dim: tint(0.4),
+            field: blend(background, panel, 0.3),
+            field_border: outline,
+            button: blend(panel, raised, 0.35),
+            button_border: outline,
+            tool_active: tint(if palette.is_dark() { 0.3 } else { 0.24 }),
+            danger: readable_on(palette.danger(), panel, 3.0),
+            warning: readable_on(palette.warning(), panel, 3.0),
+            viewport: background,
+            viewport_text: readable_on(palette.text_muted(), background, 3.0),
+            viewport_accent: a,
+            ..built_in
+        }
+    }
+
     /// The tokens [`apply`] installed (the defaults before the first frame).
     pub fn get(ctx: &egui::Context) -> Tokens {
         ctx.data(|d| d.get_temp::<Tokens>(egui::Id::NULL)).unwrap_or_default()
@@ -297,10 +385,26 @@ pub fn install(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());
 }
 
+/// The tokens for brightness `b` and `accent`, from `palette` when there is one and from the
+/// built-in theme otherwise.
+fn tokens(b: Brightness, accent: Accent, palette: Option<&Palette>) -> Tokens {
+    match palette {
+        Some(palette) => Tokens::for_palette(b, accent, palette),
+        None => Tokens::for_brightness(b).with_accent(accent),
+    }
+}
+
 /// Apply brightness `b` and `accent`: store the tokens for [`Tokens::get`] and style egui with
 /// them. Cheap enough to call on a settings change, not meant for every frame.
 pub fn apply(ctx: &egui::Context, b: Brightness, accent: Accent) {
-    let t = Tokens::for_brightness(b).with_accent(accent);
+    apply_with_palette(ctx, b, accent, None);
+}
+
+/// Apply brightness `b` and `accent`, taking the core chrome roles from `palette` when there is
+/// one. The palette decides the dark or light family; the saved brightness only picks the
+/// built-in variant while its family matches.
+pub fn apply_with_palette(ctx: &egui::Context, b: Brightness, accent: Accent, palette: Option<&Palette>) {
+    let t = tokens(b, accent, palette);
     ctx.data_mut(|d| d.insert_temp(egui::Id::NULL, t));
     ctx.all_styles_mut(|s| {
         s.text_styles = [
@@ -359,6 +463,41 @@ pub fn caption(text: &str) -> egui::RichText {
 mod tests {
     use super::*;
 
+    fn palette(dark: bool) -> Palette {
+        let json = if dark {
+            serde_json::json!({
+                "name": "test-dark",
+                "dark": true,
+                "base00": "#101418",
+                "base01": "#1a2028",
+                "base02": "#232b36",
+                "base03": "#3a4554",
+                "base04": "#8794a6",
+                "base05": "#e6edf5",
+                "base07": "#ffffff",
+                "base08": "#d9534f",
+                "base09": "#d9a441",
+                "base0D": "#4aa8ff"
+            })
+        } else {
+            serde_json::json!({
+                "name": "test-light",
+                "dark": false,
+                "base00": "#f7f8fa",
+                "base01": "#ffffff",
+                "base02": "#e8ebef",
+                "base03": "#b0b8c4",
+                "base04": "#5a6472",
+                "base05": "#1a1f27",
+                "base07": "#000000",
+                "base08": "#c0392b",
+                "base09": "#9a6a00",
+                "base0D": "#1f6feb"
+            })
+        };
+        Palette::from_canonical_json(&json).unwrap()
+    }
+
     #[test]
     fn settings_round_trip_and_unknown_values_load_the_defaults() {
         for b in Brightness::ALL {
@@ -405,5 +544,95 @@ mod tests {
         }
         // The views keep their studio grey.
         assert_eq!(Tokens::for_brightness(Brightness::Light).viewport, Tokens::for_brightness(Brightness::Dark).viewport);
+    }
+
+    #[test]
+    fn a_dark_palette_maps_the_core_chrome() {
+        let palette = palette(true);
+        let t = Tokens::for_palette(Brightness::MediumDark, Accent::Cyan, &palette);
+        assert!(t.dark);
+        assert_eq!(t.chrome, palette.background());
+        assert_eq!(t.panel, palette.surface());
+        assert_eq!(t.row_hover, palette.surface_alt());
+        assert_eq!(t.separator, palette.outline());
+        assert_eq!(t.text, palette.text());
+        assert_eq!(t.text_dim, palette.text_muted());
+        assert_eq!(t.accent, palette.accent());
+        assert_eq!(t.field_border, palette.outline());
+        assert_eq!(t.danger, palette.danger());
+        assert_eq!(t.warning, palette.warning());
+        assert_eq!(t.viewport, palette.background());
+        assert_eq!(t.viewport_text, palette.text_muted());
+        assert_eq!(t.viewport_accent, palette.accent());
+        assert_eq!(t.radius, Tokens::for_brightness(Brightness::MediumDark).radius);
+    }
+
+    #[test]
+    fn a_light_palette_maps_the_core_chrome() {
+        let palette = palette(false);
+        let t = Tokens::for_palette(Brightness::Light, Accent::Coral, &palette);
+        assert!(!t.dark);
+        assert_eq!(t.chrome, palette.background());
+        assert_eq!(t.panel, palette.surface());
+        assert_eq!(t.text, palette.text());
+        assert_eq!(t.text_dim, palette.text_muted());
+        assert_eq!(t.accent, palette.accent());
+        assert_eq!(t.separator, palette.outline());
+        assert_eq!(t.viewport, palette.background());
+        assert_eq!(t.viewport_text, palette.text_muted());
+        assert_eq!(t.viewport_accent, palette.accent());
+        assert_eq!(t.radius, Tokens::for_brightness(Brightness::Light).radius);
+    }
+
+    #[test]
+    fn a_palette_overrides_the_saved_family() {
+        let dark = palette(true);
+        let light = palette(false);
+        let dark_on_light = Tokens::for_palette(Brightness::Light, Accent::Copper, &dark);
+        assert!(dark_on_light.dark);
+        assert_eq!(dark_on_light.chrome, dark.background());
+        let light_on_dark = Tokens::for_palette(Brightness::Dark, Accent::Copper, &light);
+        assert!(!light_on_dark.dark);
+        assert_eq!(light_on_dark.panel, light.surface());
+
+        let ctx = egui::Context::default();
+        apply_with_palette(&ctx, Brightness::Light, Accent::Copper, Some(&dark));
+        assert!(Tokens::get(&ctx).dark);
+        assert!(ctx.style_of(egui::Theme::Dark).visuals.dark_mode);
+
+        let ctx = egui::Context::default();
+        apply_with_palette(&ctx, Brightness::Dark, Accent::Copper, Some(&light));
+        assert!(!Tokens::get(&ctx).dark);
+        assert!(!ctx.style_of(egui::Theme::Light).visuals.dark_mode);
+    }
+
+    #[test]
+    fn without_a_palette_the_built_in_tokens_stay() {
+        for b in Brightness::ALL {
+            for a in Accent::ALL {
+                assert_eq!(tokens(b, a, None), Tokens::for_brightness(b).with_accent(a));
+            }
+        }
+        let ctx = egui::Context::default();
+        apply_with_palette(&ctx, Brightness::MediumDark, Accent::Cyan, None);
+        assert_eq!(Tokens::get(&ctx), Tokens::for_brightness(Brightness::MediumDark).with_accent(Accent::Cyan));
+    }
+
+    #[test]
+    fn palette_text_and_accent_labels_read() {
+        for dark in [true, false] {
+            let palette = palette(dark);
+            for b in Brightness::ALL {
+                let t = Tokens::for_palette(b, Accent::Cyan, &palette);
+                assert!(contrast(t.text, t.panel) >= 4.5, "{b:?}: text on panel: {:.2}:1", contrast(t.text, t.panel));
+                assert!(contrast(t.text_dim, t.panel) >= 3.0, "{b:?}: dim text on panel: {:.2}:1", contrast(t.text_dim, t.panel));
+                assert!(contrast(t.viewport_text, t.viewport) >= 3.0, "{b:?}: lettering on the views");
+            }
+            assert!(
+                contrast(palette.contrast_text(), palette.accent()) >= 4.5,
+                "label on the accent: {:.2}:1",
+                contrast(palette.contrast_text(), palette.accent())
+            );
+        }
     }
 }

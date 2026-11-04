@@ -24,6 +24,8 @@ zip = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd = { workspace = true }
+# winit needs a window system when this crate is checked on its own.
+eframe = { workspace = true, features = ["wayland", "x11"] }
 # Floating panels open as OS windows.
 craft-ui = { workspace = true, features = ["native-windows"] }
 
