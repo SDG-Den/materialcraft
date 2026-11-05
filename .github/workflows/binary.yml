@@ -4,7 +4,7 @@ name: Binary
 # `programs.<app>.useBinary = false`.
 on:
   push:
-    branches: [testing]
+    branches: [testing, main]
     paths-ignore: ["binary-url.json"]
   workflow_dispatch:
 
