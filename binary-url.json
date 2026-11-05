@@ -1,0 +1,8 @@
+{
+  "url": "https://github.com/SDG-Den/materialcraft/releases/download/binary-testing/materialcraft-0.1.0-linux-x86_64.tar.gz",
+  "hash": "sha256-iUkFBpDz9U668f2690CcexSaQpGjbt8g02MHAly1BGg=",
+  "version": "0.1.0",
+  "tag": "binary-testing",
+  "system": "x86_64-linux",
+  "repo": "SDG-Den/materialcraft"
+}
