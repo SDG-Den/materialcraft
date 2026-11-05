@@ -21,7 +21,7 @@ concurrency:
 jobs:
   release:
     # Intentionally tracked at @main (not SHA-pinned) so org-wide CI improvements, security fixes, and build optimizations propagate without PR churn across all craftapp repos.
-    uses: storytold/craft-common-actions/.github/workflows/release.yml@main
+    uses: SDG-Den/craft-common-actions/.github/workflows/release.yml@main
     with:
       app-name: materialcraft
       app-title: "MaterialCraft"
@@ -63,7 +63,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: v
         name: Resolve version
-        uses: storytold/craft-common-actions/actions/resolve-version@main
+        uses: SDG-Den/craft-common-actions/actions/resolve-version@main
         with:
           input-version: ${{ inputs.version }}
           app-title: "MaterialCraft"
@@ -111,11 +111,11 @@ jobs:
           esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check out craft-fonts
-        uses: storytold/craft-common-actions/actions/checkout-craft-fonts@main
+        uses: SDG-Den/craft-common-actions/actions/checkout-craft-fonts@main
         with:
           ref: 3d9ab3a132ed0eff457e424226a435a901da30d3
       - name: Check out craft-i18n
-        uses: storytold/craft-common-actions/actions/checkout-craft-i18n@main
+        uses: SDG-Den/craft-common-actions/actions/checkout-craft-i18n@main
       - name: Start the FreeBSD VM
         uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
         with:
@@ -203,7 +203,7 @@ jobs:
         id: cargo-cache
         continue-on-error: true
         timeout-minutes: 10
-        uses: storytold/craft-common-actions/actions/freebsd-cargo-cache@main
+        uses: SDG-Den/craft-common-actions/actions/freebsd-cargo-cache@main
         with:
           profile: release
           configuration: ${{ toJSON(inputs) }}
@@ -284,7 +284,7 @@ jobs:
         if: github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && steps.cargo-cache.outputs.key != '' && steps.cargo-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         timeout-minutes: 10
-        uses: storytold/craft-common-actions/actions/freebsd-cargo-cache@main
+        uses: SDG-Den/craft-common-actions/actions/freebsd-cargo-cache@main
         with:
           phase: save
           profile: release

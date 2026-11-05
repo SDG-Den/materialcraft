@@ -18,6 +18,10 @@
   # The package of this flake; `flake.nix` passes it through `_module.args`, so importing the
   # module directly needs no overlay.
   materialcraftPackage ? pkgs.materialcraft,
+  # `flake.nix` passes the source build and the pre-built release binary separately. Importing the
+  # module directly falls back to `materialcraftPackage` and no binary.
+  materialcraftSourcePackage ? materialcraftPackage,
+  materialcraftBinaryPackage ? null,
   ...
 }:
 
@@ -42,10 +46,24 @@ in
   options.programs.materialcraft = {
     enable = mkEnableOption "MaterialCraft";
 
+    useBinary = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Install the pre-built Linux binary from `binary-url.json` when this system has one,
+        instead of building from source. Falls back to the source build when the file is missing
+        or the system is unsupported.
+      '';
+    };
+
     package = mkOption {
       type = types.package;
-      default = materialcraftPackage;
-      defaultText = lib.literalMD "the `materialcraft` package of this flake";
+      default =
+        if cfg.useBinary && materialcraftBinaryPackage != null then
+          materialcraftBinaryPackage
+        else
+          materialcraftSourcePackage;
+      defaultText = lib.literalMD "the pre-built binary from `binary-url.json`, or the source build";
       description = "The MaterialCraft package to install.";
     };
 
