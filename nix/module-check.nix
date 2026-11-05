@@ -90,7 +90,49 @@ let
   home = evalModule "home-manager" true palette;
   homePlain = evalModule "home-manager" false null;
 
+  binaryStub = pkgs.runCommand "materialcraft-binary-stub" { } "touch $out";
+
+  evalDefault =
+    useBinary: binary:
+    lib.evalModules {
+      specialArgs = {
+        inherit pkgs;
+        materialcraftSourcePackage = materialcraft;
+        materialcraftBinaryPackage = binary;
+      };
+      modules = [
+        (import ./module.nix { kind = "nixos"; })
+        nixosStub
+        {
+          programs.materialcraft = {
+            enable = true;
+            inherit useBinary;
+          };
+        }
+      ];
+    };
+
+  nixosDefault = evalDefault true binaryStub;
+  nixosNoBinary = evalDefault true null;
+  nixosSourceChosen = evalDefault false binaryStub;
+
   assertions = [
+    {
+      what = "useBinary defaults to true";
+      ok = nixosDefault.config.programs.materialcraft.useBinary;
+    }
+    {
+      what = "the binary is the default package";
+      ok = nixosDefault.config.environment.systemPackages == [ binaryStub ];
+    }
+    {
+      what = "the source build is used without a binary";
+      ok = nixosNoBinary.config.environment.systemPackages == [ materialcraft ];
+    }
+    {
+      what = "useBinary = false selects the source build";
+      ok = nixosSourceChosen.config.environment.systemPackages == [ materialcraft ];
+    }
     {
       what = "nixos installs the package";
       ok = nixos.config.environment.systemPackages == [ materialcraft ];
