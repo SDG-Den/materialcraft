@@ -29,6 +29,7 @@ pub mod windows;
 
 use std::collections::VecDeque;
 
+use craft_ui::theme::palette::Palette;
 use materialcraft_engine::Session;
 use serde_json::Value;
 
@@ -68,7 +69,12 @@ pub struct MaterialCraftApp {
     last_time: f64,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     next_autosave: f64,
-    styled: Option<(theme::Brightness, theme::Accent)>,
+    styled: Option<(theme::Brightness, theme::Accent, u64)>,
+    /// The suite palette loaded at startup or by the watcher. `None` keeps the built-in theme.
+    palette: Option<Palette>,
+    palette_revision: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    palette_watcher: craft_ui::theme::PaletteWatcher,
     /// The icon font is installed (it takes effect on the frame after `set_fonts`).
     fonts_ready: bool,
 }
@@ -89,6 +95,10 @@ impl MaterialCraftApp {
         ui.windows = state::Windows::default();
         ui.frame_all = true;
         let next_autosave = ui.prefs.autosave_minutes as f64 * 60.0;
+        #[cfg(not(target_arch = "wasm32"))]
+        let palette = Palette::load().map(|loaded| loaded.palette);
+        #[cfg(target_arch = "wasm32")]
+        let palette: Option<Palette> = None;
         let mut app = MaterialCraftApp {
             session,
             ui,
@@ -108,6 +118,10 @@ impl MaterialCraftApp {
             last_time: 0.0,
             next_autosave,
             styled: None,
+            palette,
+            palette_revision: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            palette_watcher: craft_ui::theme::PaletteWatcher::from_env(),
             fonts_ready: false,
         };
         app.apply_prefs();
@@ -208,9 +222,16 @@ impl MaterialCraftApp {
             self.fps = self.fps * 0.9 + (1.0 / dt) * 0.1;
         }
         self.last_time = now;
-        let style = (self.ui.prefs.brightness, self.ui.prefs.accent);
+        #[cfg(not(target_arch = "wasm32"))]
+        if ctx.input(|input| input.viewport().visible().unwrap_or(true)) {
+            if let Some(loaded) = self.palette_watcher.poll(ctx) {
+                self.palette = Some(loaded.palette);
+                self.palette_revision = self.palette_revision.wrapping_add(1);
+            }
+        }
+        let style = (self.ui.prefs.brightness, self.ui.prefs.accent, self.palette_revision);
         if self.styled != Some(style) {
-            theme::apply(ctx, style.0, style.1);
+            theme::apply_with_palette(ctx, style.0, style.1, self.palette.as_ref());
             self.styled = Some(style);
         }
         let scale = self.ui.prefs.ui_scale.clamp(0.5, 3.0);
