@@ -4,7 +4,7 @@ name: Binary
 # `programs.<app>.useBinary = false`.
 on:
   push:
-    branches: [nix-flake]
+    branches: [testing]
     paths-ignore: ["binary-url.json"]
   workflow_dispatch:
 
